@@ -1,0 +1,64 @@
+[basic]
+# 是否启用插件
+enable = true
+# ALAPI的token,用于部分API调用
+alapi_token = ""
+
+[common]
+# 请求时使用的User-Agent列表
+user_agents = ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"]
+
+[morning_news]
+text_enabled = false
+command = "早报"
+
+[moyu_calendar]
+backup_api = "https://dayu.qqsuu.cn/moyuribao/apis.php"
+command = "摸鱼"
+
+[bagua]
+api_url = "https://dayu.qqsuu.cn/mingxingbagua/apis.php"
+command = "八卦"
+
+[kfc]
+api_url = "https://api.suyanw.cn/api/kfcyl.php"
+command = "kfc"
+
+[eat]
+api_url = "https://zj.v.api.aa1.cn/api/eats/"
+command = "吃什么"
+aliases = ["今天吃什么", "吃点什么", "中午吃什么", "中午吃啥", "晚上吃啥", "晚上吃什么", "吃啥", "吃啥?", "今天吃啥"]
+
+[horoscope]
+default_period = "today"
+zodiac_mapping = """
+{
+    "白羊座": "aries",
+    "金牛座": "taurus",
+    "双子座": "gemini",
+    "巨蟹座": "cancer",
+    "狮子座": "leo",
+    "处女座": "virgo",
+    "天秤座": "libra",
+    "天蝎座": "scorpio",
+    "射手座": "sagittarius",
+    "摩羯座": "capricorn",
+    "水瓶座": "aquarius",
+    "双鱼座": "pisces"
+}
+"""
+
+[express]
+default_order = "asc"
+
+[weather]
+show_clothing_index = true
+forecast_hours = 10
+default_city = "北京"
+tip_format = "输入不规范，请输<国内城市+(今天|明天|后天|七天|7天)+天气>，比如 '广州天气'"
+time_keywords = ["今天", "明天", "后天", "七天", "7天"]
+
+[chouqian]
+enable = true
+command = ["抽签"]
+api_key = ""

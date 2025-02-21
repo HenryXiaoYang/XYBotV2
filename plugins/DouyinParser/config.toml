@@ -1,5 +1,7 @@
-[DouyinParser]
-# Http代理设置
+[basic]
+enable = true
+
+# Http代理设置（用于获取真实链接发送卡片，如果家里有ipv6，可以设置为空）
 # 格式: http://用户名:密码@代理地址:代理端口
 # 例如：http://127.0.0.1:7890
-http-proxy = ""
+http_proxy = "192.168.1.6:7890" 

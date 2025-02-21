@@ -1,6 +1,9 @@
 import re
 import tomllib
+import os
 from typing import Dict, Any
+import traceback
+import asyncio
 
 import aiohttp
 from loguru import logger
@@ -25,9 +28,22 @@ class DouyinParser(PluginBase):
         self.url_pattern = re.compile(r'https?://v\.douyin\.com/\w+/?')
 
         # 读取代理配置
-        with open("plugins/DouyinParser/config.toml", "rb") as f:
-            config = tomllib.load(f)
-            self.http_proxy = config.get("DouyinParser", {}).get("http-proxy", None)
+        config_path = os.path.join(os.path.dirname(__file__), "config.toml")
+        try:
+            with open(config_path, "rb") as f:
+                config = tomllib.load(f)
+                
+            # 基础配置
+            basic_config = config.get("basic", {})
+            self.enable = basic_config.get("enable", True)
+            self.http_proxy = basic_config.get("http_proxy", None)
+            
+        except Exception as e:
+            logger.error(f"加载抖音解析器配置文件失败: {str(e)}")
+            self.enable = True
+            self.http_proxy = None
+
+        logger.debug("[抖音] 插件初始化完成，代理设置: {}", self.http_proxy)
 
     def _clean_response_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """清理响应数据"""
@@ -42,17 +58,66 @@ class DouyinParser(PluginBase):
 
     async def _get_real_video_url(self, video_url: str) -> str:
         """获取真实视频链接"""
-        try:
-            async with aiohttp.ClientSession(proxy=self.http_proxy) as session:
-                async with session.get(video_url, allow_redirects=True, timeout=30) as response:
-                    if response.status == 200:
-                        return str(response.url)
-                    else:
-                        logger.error(f"获取视频真实链接失败: {response.status}")
-                        return video_url
-        except Exception as e:
-            logger.error(f"获取视频真实链接时出错: {str(e)}")
-            return video_url
+        max_retries = 3  # 最大重试次数
+        retry_delay = 2  # 重试延迟秒数
+        
+        for retry in range(max_retries):
+            try:
+                logger.info("[抖音] 开始获取真实视频链接: {} (第{}次尝试)", video_url, retry + 1)
+                
+                # 修正代理格式
+                proxy = f"http://{self.http_proxy}" if self.http_proxy and not self.http_proxy.startswith(('http://', 'https://')) else self.http_proxy
+                logger.debug("[抖音] 使用代理: {}", proxy)
+                
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                    'Range': 'bytes=0-'
+                }
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(video_url, 
+                                         proxy=proxy, 
+                                         headers=headers,
+                                         allow_redirects=True, 
+                                         timeout=60) as response:  # 延长超时时间到60秒
+                        if response.status == 200 or response.status == 206:
+                            # 获取所有重定向历史
+                            history = [str(resp.url) for resp in response.history]
+                            real_url = str(response.url)
+                            
+                            # 记录重定向链接历史，用于调试
+                            if history:
+                                logger.debug("[抖音] 重定向历史: {}", history)
+                            
+                            # 检查是否获取到了真实的视频URL
+                            if real_url != video_url and ('v3-' in real_url.lower() or 'douyinvod.com' in real_url.lower()):
+                                logger.info("[抖音] 成功获取真实链接: {}", real_url)
+                                return real_url
+                            else:
+                                logger.warning("[抖音] 未能获取到真实视频链接，准备重试")
+                                if retry < max_retries - 1:  # 如果不是最后一次尝试，则等待后重试
+                                    await asyncio.sleep(retry_delay)
+                                    continue
+                                return video_url
+                        else:
+                            logger.error("[抖音] 获取视频真实链接失败, 状态码: {}", response.status)
+                            logger.debug("[抖音] 响应头: {}", response.headers)
+                            if retry < max_retries - 1:
+                                await asyncio.sleep(retry_delay)
+                                continue
+                            return video_url
+                        
+            except Exception as e:
+                logger.error("[抖音] 获取真实链接失败: {} (第{}次尝试)", str(e), retry + 1)
+                if retry < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    continue
+                return video_url
+        
+        logger.error("[抖音] 获取真实链接失败，已达到最大重试次数")
+        return video_url
 
     async def _parse_douyin(self, url: str) -> Dict[str, Any]:
         """调用抖音解析API"""
@@ -63,40 +128,38 @@ class DouyinParser(PluginBase):
                 'type': 'json'
             }
 
-            logger.debug(f"开始解析抖音链接: {url}")
-            logger.debug(f"请求API: {api_url}, 参数: {params}")
+            logger.debug("[抖音] 开始解析链接: {}", url)
+            logger.debug("[抖音] 请求API: {}, 参数: {}", api_url, params)
 
-            async with aiohttp.ClientSession() as session:  # 解析不使用代理
+            async with aiohttp.ClientSession() as session:
                 async with session.get(api_url, params=params, timeout=30) as response:
                     if response.status != 200:
                         raise DouyinParserError(f"API请求失败，状态码: {response.status}")
 
                     data = await response.json()
-                    logger.debug(f"原始API响应数据: {data}")
+                    logger.debug("[抖音] 原始API响应数据: {}", data)
 
                     if data.get("code") == 200:
                         result = data.get("data", {})
+                        if not result:
+                            raise DouyinParserError("API返回数据为空")
 
                         # 获取真实视频链接
                         if result.get('video'):
-                            # 使用代理访问视频链接获取真实URL
                             result['video'] = await self._get_real_video_url(result['video'])
 
                         result = self._clean_response_data(result)
-                        logger.debug(f"清理后的数据: {result}")
+                        logger.debug("[抖音] 清理后的数据: {}", result)
                         return result
                     else:
                         raise DouyinParserError(data.get("message", "未知错误"))
 
-        except aiohttp.ClientTimeout:
-            logger.error(f"API请求超时: {api_url}")
-            raise DouyinParserError("解析超时，请稍后重试")
-        except aiohttp.ClientError as e:
-            logger.error(f"API请求错误: {str(e)}")
-            raise DouyinParserError(f"网络请求失败: {str(e)}")
+        except (aiohttp.ClientTimeout, aiohttp.ClientError, DouyinParserError) as e:
+            logger.error("[抖音] 解析失败: {}", str(e))
+            raise DouyinParserError(str(e))
         except Exception as e:
-            logger.error(f"解析过程发生错误: {str(e)}, URL: {url}")
-            raise DouyinParserError(f"解析失败: {str(e)}")
+            logger.error("[抖音] 解析过程发生未知错误: {}\n{}", str(e), traceback.format_exc())
+            raise DouyinParserError(f"未知错误: {str(e)}")
 
     async def _send_test_card(self, bot: WechatAPIClient, chat_id: str, sender: str):
         """发送测试卡片消息"""
@@ -145,8 +208,11 @@ class DouyinParser(PluginBase):
                 at=[sender]
             )
 
-    @on_text_message
+    @on_text_message(priority=80)
     async def handle_douyin_links(self, bot: WechatAPIClient, message: dict):
+        if not self.enable:
+            return True
+
         content = message['Content']
         sender = message['SenderWxid']
         chat_id = message['FromWxid']
@@ -164,6 +230,15 @@ class DouyinParser(PluginBase):
 
             original_url = match.group(0)
             logger.info(f"发现抖音链接: {original_url}")
+            
+            # 添加解析提示
+            msg_args = {
+                'wxid': chat_id,
+                'content': "检测到抖音分享链接，正在解析无水印视频...\n" if message['IsGroup'] else "检测到抖音分享链接，正在解析无水印视频..."
+            }
+            if message['IsGroup']:
+                msg_args['at'] = [sender]
+            await bot.send_text_message(**msg_args)
 
             # 解析视频信息
             video_info = await self._parse_douyin(original_url)
@@ -182,17 +257,14 @@ class DouyinParser(PluginBase):
 
             # 发送文字版消息
             text_msg = (
-                f"🎬 解析成功\n"
-                f"标题：{title}\n"
-                f"作者：{author}\n"
-                f"封面：{cover}\n"
-                f"无水印链接：{video_url}"
+                f"🎬 解析成功，微信内可直接观看（需ipv6）,浏览器打开可下载保存。\n"
+                f"链接含有有效期，请尽快保存。\n"
             )
-            await bot.send_text_message(
-                wxid=chat_id,
-                content=text_msg,
-                at=[sender]
-            )
+            if message['IsGroup']:
+                text_msg = text_msg + "\n"
+                await bot.send_text_message(wxid=chat_id, content=text_msg, at=[sender])
+            else:
+                await bot.send_text_message(wxid=chat_id, content=text_msg)
 
             # 发送卡片版消息
             await bot.send_link_message(
@@ -205,11 +277,23 @@ class DouyinParser(PluginBase):
 
             logger.info(f"已发送解析结果: 标题[{title}] 作者[{author}]")
 
-        except (DouyinParserError, Exception) as e:
-            error_msg = str(e) if str(e) else "未知错误"
+        except DouyinParserError as e:
+            error_msg = str(e) if str(e) else "解析失败"
             logger.error(f"抖音解析失败: {error_msg}")
-            await bot.send_text_message(
-                wxid=chat_id,
-                content=f"视频解析失败: {error_msg}",
-                at=[sender]
-            )
+            if message['IsGroup']:
+                await bot.send_text_message(wxid=chat_id, content=f"视频解析失败: {error_msg}\n", at=[sender])
+            else:
+                await bot.send_text_message(wxid=chat_id, content=f"视频解析失败: {error_msg}")
+        except Exception as e:
+            error_msg = str(e) if str(e) else "未知错误"
+            logger.error(f"抖音解析发生未知错误: {error_msg}")
+            if message['IsGroup']:
+                await bot.send_text_message(wxid=chat_id, content=f"视频解析失败: {error_msg}\n", at=[sender])
+            else:
+                await bot.send_text_message(wxid=chat_id, content=f"视频解析失败: {error_msg}")
+
+    async def async_init(self):
+        """异步初始化函数"""
+        # 可以在这里进行一些异步的初始化操作
+        # 比如测试API可用性等
+        pass

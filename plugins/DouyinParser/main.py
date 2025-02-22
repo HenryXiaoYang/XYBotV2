@@ -56,6 +56,12 @@ class DouyinParser(PluginBase):
 
         return data
 
+    def _clean_url(self, url: str) -> str:
+        """清理URL中的特殊字符"""
+        cleaned_url = url.strip().replace(';', '').replace('\n', '').replace('\r', '')
+        logger.debug("[抖音] 清理后的URL: {}", cleaned_url)  # 添加日志
+        return cleaned_url
+
     async def _get_real_video_url(self, video_url: str) -> str:
         """获取真实视频链接"""
         max_retries = 3  # 最大重试次数
@@ -123,21 +129,23 @@ class DouyinParser(PluginBase):
         """调用抖音解析API"""
         try:
             api_url = "https://apih.kfcgw50.me/api/douyin"
+            clean_url = self._clean_url(url)
             params = {
-                'url': url,
+                'url': clean_url,
                 'type': 'json'
             }
 
-            logger.debug("[抖音] 开始解析链接: {}", url)
-            logger.debug("[抖音] 请求API: {}, 参数: {}", api_url, params)
+            logger.debug("[抖音] 请求API: {}, 参数: {}", api_url, repr(params))  # 添加日志
 
             async with aiohttp.ClientSession() as session:
-                async with session.get(api_url, params=params, timeout=30) as response:
+                # 使用代理
+                proxy = f"http://{self.http_proxy}" if self.http_proxy and not self.http_proxy.startswith(('http://', 'https://')) else self.http_proxy
+                async with session.get(api_url, params=params, timeout=30, proxy=proxy) as response:  # 使用代理
                     if response.status != 200:
                         raise DouyinParserError(f"API请求失败，状态码: {response.status}")
 
                     data = await response.json()
-                    logger.debug("[抖音] 原始API响应数据: {}", data)
+                    logger.debug("[抖音] API响应数据: {}", data)  # 添加日志
 
                     if data.get("code") == 200:
                         result = data.get("data", {})
@@ -154,7 +162,7 @@ class DouyinParser(PluginBase):
                     else:
                         raise DouyinParserError(data.get("message", "未知错误"))
 
-        except (aiohttp.ClientTimeout, aiohttp.ClientError, DouyinParserError) as e:
+        except (aiohttp.ClientTimeout, aiohttp.ClientError) as e:
             logger.error("[抖音] 解析失败: {}", str(e))
             raise DouyinParserError(str(e))
         except Exception as e:
@@ -223,12 +231,12 @@ class DouyinParser(PluginBase):
             return
 
         try:
-            # 提取抖音链接
+            # 提取抖音链接并清理
             match = self.url_pattern.search(content)
             if not match:
                 return
 
-            original_url = match.group(0)
+            original_url = self._clean_url(match.group(0))
             logger.info(f"发现抖音链接: {original_url}")
             
             # 添加解析提示

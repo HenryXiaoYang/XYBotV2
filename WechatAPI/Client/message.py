@@ -92,6 +92,7 @@ class MessageMixin(WechatAPIClientBase):
                 logger.info("消息撤回成功: 对方wxid:{} ClientMsgId:{} CreateTime:{} NewMsgId:{}",
                             wxid,
                             client_msg_id,
+                            create_time,
                             new_msg_id)
                 return True
             else:

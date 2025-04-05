@@ -203,7 +203,7 @@ def on_at_message(priority=50):
 
 
 def on_system_message(priority=50):
-    """其他消息装饰器"""
+    """系统消息装饰器"""
 
     def decorator(func):
         if callable(priority):
@@ -211,7 +211,23 @@ def on_system_message(priority=50):
             setattr(f, '_event_type', 'system_message')
             setattr(f, '_priority', 50)
             return f
-        setattr(func, '_event_type', 'other_message')
+        setattr(func, '_event_type', 'system_message')
+        setattr(func, '_priority', min(max(priority, 0), 99))
+        return func
+
+    return decorator if not callable(priority) else decorator(priority)
+
+
+def on_revoke_message(priority=50):
+    """撤回消息装饰器"""
+
+    def decorator(func):
+        if callable(priority):
+            f = priority
+            setattr(f, '_event_type', 'revoke_message')
+            setattr(f, '_priority', 50)
+            return f
+        setattr(func, '_event_type', 'revoke_message')
         setattr(func, '_priority', min(max(priority, 0), 99))
         return func
 

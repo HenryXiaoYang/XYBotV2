@@ -1,8 +1,10 @@
+import base64
 import tomllib
 import xml.etree.ElementTree as ET
 from typing import Dict, Any
 
 from loguru import logger
+import requests
 
 from WechatAPI import WechatAPIClient
 from WechatAPI.Client.protect import protector
@@ -70,6 +72,9 @@ class XYBot:
 
         elif msg_type == 43:  # 视频消息
             await self.process_video_message(message)
+
+        elif msg_type == 47:  # emoji消息
+            await self.process_emoji_message(message)
 
         elif msg_type == 49:  # xml消息
             await self.process_xml_message(message)
@@ -541,6 +546,8 @@ class XYBot:
 
         if msg_type == "pat":
             await self.process_pat_message(message)
+        elif msg_type == "revokemsg":
+            await self.process_revoke_message(message)
         elif msg_type == "ClientCheckGetExtInfo":
             pass
         else:
@@ -597,3 +604,114 @@ class XYBot:
             return (FromWxid not in self.blacklist) and (SenderWxid not in self.blacklist)
         else:
             return True
+
+    async def process_revoke_message(self, message: Dict[str, Any]):
+        """处理撤回消息"""
+        try:
+            root = ET.fromstring(message["Content"])
+            revoke = root.find("revokemsg")
+            session_id = revoke.find("session").text
+            msg_id = int(revoke.find("msgid").text)
+            new_msg_id = int(revoke.find("newmsgid").text)
+            replace_msg = revoke.find("replacemsg").text
+        except Exception as e:
+            logger.error(f"解析撤回消息失败: {e}")
+            return
+        
+        message["Revoke"] = {}  
+        message['Revoke']["SessionId"] = session_id
+        message['Revoke']["MsgId"] = msg_id
+        message['Revoke']["NewMsgId"] = new_msg_id
+        message['Revoke']["ReplaceMsg"] = replace_msg
+
+        logger.info("收到撤回消息: 消息ID:{} 来自:{} 发送人:{} 会话ID:{} 消息ID:{} 新消息ID:{} 替换消息:{}",
+                    message["MsgId"],
+                    message["FromWxid"],
+                    message["SenderWxid"],
+                    message["Revoke"]["SessionId"],
+                    message["Revoke"]["MsgId"],
+                    message["Revoke"]["NewMsgId"],
+                    message["Revoke"]["ReplaceMsg"])
+        
+        if self.ignore_check(message["FromWxid"], message["SenderWxid"]):
+            await EventManager.emit("revoke_message", self.bot, message)
+        else:
+            logger.warning("风控保护: 新设备登录后4小时内请挂机")
+
+    async def process_emoji_message(self, message: Dict[str, Any]):
+        """处理表情消息"""
+        # 预处理消息
+        message["Content"] = message.get("Content").get("string").replace("\n", "").replace("\t", "")
+
+        if message["FromWxid"].endswith("@chatroom"):  # 群聊消息
+            message["IsGroup"] = True
+            split_content = message["Content"].split(":<msg>", 1)
+            if len(split_content) > 1:
+                message["Content"] = '<msg>' + split_content[1]
+                message["SenderWxid"] = split_content[0]
+            else:  # 绝对是自己发的消息! qwq
+                message["Content"] = split_content[0]
+                message["SenderWxid"] = self.wxid
+        else:
+            message["SenderWxid"] = message["FromWxid"]
+            if message["FromWxid"] == self.wxid:  # 自己发的消息
+                message["FromWxid"] = message["ToWxid"]
+            message["IsGroup"] = False
+
+        try:
+            root = ET.fromstring(message["Content"])
+            emoji = root.find("emoji")
+            emoji_md5 = emoji.attrib["md5"]
+            emoji_length = int(emoji.attrib["len"])
+            emoji_product_id = emoji.attrib["productid"]
+            emoji_cdn_url = emoji.attrib["cdnurl"]
+            emoji_aes_key = emoji.attrib["aeskey"]
+            emoji_width = int(emoji.attrib["width"])
+            emoji_height = int(emoji.attrib["height"])
+            emoji_desc = base64.b64decode(emoji.attrib["desc"]).decode("utf-8").strip()
+        except Exception as e:
+            logger.error(f"解析表情消息失败: {e}")
+            with open("/home/pi/emoji.xml", "w", encoding="utf-8") as f:
+                f.write(message["Content"])
+            return
+        
+        message['Emoji'] = {}
+        message['Emoji']['Md5'] = emoji_md5
+        message['Emoji']['Length'] = emoji_length
+        message['Emoji']['ProductId'] = emoji_product_id
+        message['Emoji']['Width'] = emoji_width
+        message['Emoji']['Height'] = emoji_height
+        message['Emoji']['Desc'] = emoji_desc
+        message['Emoji']['CdnUrl'] = emoji_cdn_url
+        message['Emoji']['AesKey'] = emoji_aes_key
+
+        logger.info(
+            "收到表情消息: 消息ID:{} 来自:{} 发送人:{} 表情MD5:{} 产品ID:{} 宽度:{} 高度:{} 表情描述:{}",
+            message["MsgId"],
+            message["FromWxid"],
+            message["SenderWxid"],
+            emoji_md5,
+            emoji_product_id,
+            emoji_width,
+            emoji_height,
+            emoji_desc
+        )
+        
+        # 下载图片
+        if emoji_cdn_url:
+            try:
+                response = requests.get(emoji_cdn_url)
+                if response.status_code == 200:
+                    image_data = response.content
+                    message["Content"] = base64.b64encode(image_data).decode('utf-8')
+                else:
+                    logger.error(f"下载表情图片失败: HTTP状态码 {response.status_code}")
+            except Exception as e:
+                logger.error(f"下载表情图片异常: {e}")
+        
+        if self.ignore_check(message["FromWxid"], message["SenderWxid"]):
+            await EventManager.emit("emoji_message", self.bot, message)
+        else:
+            logger.warning("风控保护: 新设备登录后4小时内请挂机")
+
+

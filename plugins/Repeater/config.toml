@@ -1,0 +1,22 @@
+[basic]
+# 插件开关
+enable = true
+
+[repeater]
+# 缓存时间（秒）
+cache_timeout = 3600
+
+# 是否在群聊中启用
+enable_in_group = true
+
+# 是否在私聊中启用
+enable_in_private = true
+
+# 历史记录大小（保存最近的消息数量）
+max_history = 60
+
+# 已复读消息记录大小（防止重复复读的记录数量）
+max_repeated = 5
+
+# 触发复读的最小重复次数
+min_repeat_count = 2 

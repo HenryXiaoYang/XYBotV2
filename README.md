@@ -31,14 +31,6 @@ XYBot V2 是一个功能丰富的微信机器人框架,支持多种互动功能�
     <a href="https://qrcode.yangres.com/get_image">🔗图片会被缓存，点我查看最新二维码</a>
 </div>
 
-# 🙏 赞助
-
-<div style="text-align: center" align="center">
-    <h2>开源不易，请作者喝杯奶茶吧🙏</h2>
-    <img alt="微信收款码" src="docs/sponsor1.jpg" style="width: 250px; height: auto;">
-    <img alt="微信收款码" src="docs/sponsor2.jpg" style="width: 250px; height: auto;">
-</div>
-
 # ✨ 主要功能
 
 ## 🛠️ 基础功能
